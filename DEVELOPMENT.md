@@ -160,7 +160,7 @@ TEST(set_get_basic) {
 |------|------|------|
 | 1 | ✅ 完成 | 项目骨架、事件循环、RESP 协议、PING/PONG |
 | 2 | ✅ 完成 | String + Key 命令（SET/GET/DEL/EXISTS/EXPIRE/TTL/TYPE） |
-| 3 | 🔲 待做 | Hash + List 命令 |
+| 3 | ✅ 完成 | Hash + List 命令 |
 | 4 | 🔲 待做 | Set + ZSet 命令（跳表已实现） |
 | 5 | 🔲 待做 | 定期过期删除 |
 | 6 | 🔲 待做 | RDB 快照 + AOF 日志持久化 |
