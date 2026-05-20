@@ -168,8 +168,8 @@ redis_like/
 ├── DEVELOPMENT.md         # 开发文档
 ├── description.md         # 项目设计文档
 ├── src/
-│   ├── main.cpp
-│   ├── server.h/cpp
+│   ├── main.cpp		   # 主函数入口
+│   ├── server.h/cpp	   # 服务器核心逻辑
 │   ├── common.h           # 公共类型
 │   ├── object.h           # RedisObject variant
 │   ├── dict.h             # 全局键空间
@@ -177,20 +177,28 @@ redis_like/
 │   ├── resp_codec.h/cpp   # RESP 协议编解码
 │   ├── expire.h/cpp       # 过期管理器
 │   ├── command/
-│   │   ├── router.h/cpp
-│   │   ├── string_cmd.cpp
-│   │   ├── hash_cmd.cpp
-│   │   ├── list_cmd.cpp
-│   │   ├── set_cmd.cpp
-│   │   └── zset_cmd.cpp
-│   ├── ds/
+│   │   ├── router.h/cpp   # 命令路由
+│   │   ├── string_cmd.cpp # 字符串命令
+│   │   ├── hash_cmd.cpp   # 哈希命令
+│   │   ├── list_cmd.cpp   # 列表命令
+│   │   ├── set_cmd.cpp    # 集合命令
+│   │   └── zset_cmd.cpp   # 有序集合命令
+│   ├── ds/					# 数据结构
 │   │   ├── skiplist.h/cpp  # 跳表（ZSet）
 │   │   ├── list.h/cpp      # 链表
 │   │   └── intset.h        # 整数集合
-│   └── storage/
+│   └── storage/			# 持久化
 │       ├── rdb.h/cpp       # RDB 快照
 │       └── aof.h/cpp       # AOF 日志
 ├── tests/                  # 8 个测试套件，118 项
+│   └── test_expire.cpp
+│   └── test_hash_cmd.cpp
+│   └── test_list_cmd.cpp
+│   └── test_persistence.cpp
+│   └── test_resp.cpp
+│   └── test_set_cmd.cpp
+│   └── test_string_cmd.cpp
+│   └── test_zset_cmd.cpp
 ├── benchmark/
 │   └── bench.cpp           # 压测工具
 └── build/
