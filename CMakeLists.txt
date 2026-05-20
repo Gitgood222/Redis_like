@@ -65,3 +65,13 @@ if(BUILD_TESTS)
     enable_testing()
     add_subdirectory(tests)
 endif()
+
+# ---------- benchmark ----------
+option(BUILD_BENCH "Build benchmark" ON)
+if(BUILD_BENCH)
+    add_executable(bench benchmark/bench.cpp)
+    target_include_directories(bench PUBLIC ${SRC_DIR})
+    if(WIN32)
+        target_link_libraries(bench PRIVATE ws2_32)
+    endif()
+endif()
