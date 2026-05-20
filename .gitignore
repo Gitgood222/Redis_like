@@ -1,0 +1,24 @@
+# Build
+build/
+x64/
+Debug/
+Release/
+*.exe
+*.obj
+*.o
+*.a
+*.lib
+
+# IDE
+.vs/
+*.slnx
+*.vcxproj*
+*.user
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Dumps
+dump.rdb
+appendonly.aof
