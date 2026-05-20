@@ -1,7 +1,17 @@
 #include "skiplist.h"
+#include "../object.h"
 #include <algorithm>
 
 namespace redis {
+
+// RedisObject factory for ZSet type
+std::shared_ptr<RedisObject> RedisObject::CreateZSet() {
+    auto obj = std::make_shared<RedisObject>();
+    obj->type = ObjType::kZSet;
+    obj->encoding = ObjEncoding::kSkipList;
+    obj->value = std::make_shared<SkipList>();
+    return obj;
+}
 
 SkipList::SkipList() {
     header_ = new SkipListNode(0.0, "", kMaxLevel);

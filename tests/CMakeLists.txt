@@ -70,3 +70,40 @@ target_compile_options(test_list_cmd PRIVATE
 )
 
 add_test(NAME list_cmd COMMAND test_list_cmd)
+
+add_executable(test_set_cmd
+    test_set_cmd.cpp
+    ${TEST_SRC_DIR}/command/set_cmd.cpp
+    ${TEST_SRC_DIR}/command/string_cmd.cpp
+    ${TEST_SRC_DIR}/command/router.cpp
+    ${TEST_SRC_DIR}/expire.cpp
+    ${TEST_SRC_DIR}/resp_codec.cpp
+)
+
+target_include_directories(test_set_cmd PUBLIC ${TEST_SRC_DIR})
+
+target_compile_options(test_set_cmd PRIVATE
+    $<$<CXX_COMPILER_ID:MSVC>:/W4>
+    $<$<NOT:$<CXX_COMPILER_ID:MSVC>>:-Wall -Wextra>
+)
+
+add_test(NAME set_cmd COMMAND test_set_cmd)
+
+add_executable(test_zset_cmd
+    test_zset_cmd.cpp
+    ${TEST_SRC_DIR}/command/zset_cmd.cpp
+    ${TEST_SRC_DIR}/command/string_cmd.cpp
+    ${TEST_SRC_DIR}/command/router.cpp
+    ${TEST_SRC_DIR}/expire.cpp
+    ${TEST_SRC_DIR}/resp_codec.cpp
+    ${TEST_SRC_DIR}/ds/skiplist.cpp
+)
+
+target_include_directories(test_zset_cmd PUBLIC ${TEST_SRC_DIR})
+
+target_compile_options(test_zset_cmd PRIVATE
+    $<$<CXX_COMPILER_ID:MSVC>:/W4>
+    $<$<NOT:$<CXX_COMPILER_ID:MSVC>>:-Wall -Wextra>
+)
+
+add_test(NAME zset_cmd COMMAND test_zset_cmd)

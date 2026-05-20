@@ -74,7 +74,8 @@ struct RedisObject {
         return obj;
     }
 
-    // 跳表工厂在 skiplist.h 中实现
+    // ZSet factory — defined in ds/skiplist.cpp (needs full SkipList definition)
+    static std::shared_ptr<RedisObject> CreateZSet();
 
     template <typename T>
     T* As() { return std::get_if<T>(&value); }

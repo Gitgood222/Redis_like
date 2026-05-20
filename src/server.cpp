@@ -39,6 +39,8 @@ RedisServer::RedisServer() {
     RegisterKeyCommands(router_);
     RegisterHashCommands(router_);
     RegisterListCommands(router_);
+    RegisterSetCommands(router_);
+    RegisterZSetCommands(router_);
 }
 
 RedisServer::~RedisServer() {

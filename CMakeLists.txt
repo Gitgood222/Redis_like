@@ -24,6 +24,8 @@ set(SOURCES
     ${SRC_DIR}/command/string_cmd.cpp
     ${SRC_DIR}/command/hash_cmd.cpp
     ${SRC_DIR}/command/list_cmd.cpp
+    ${SRC_DIR}/command/set_cmd.cpp
+    ${SRC_DIR}/command/zset_cmd.cpp
     ${SRC_DIR}/expire.cpp
     ${SRC_DIR}/ds/skiplist.cpp
     ${SRC_DIR}/ds/list.cpp
