@@ -163,5 +163,5 @@ TEST(set_get_basic) {
 | 3 | ✅ 完成 | Hash + List 命令 |
 | 4 | ✅ 完成 | Set + ZSet 命令（跳表） |
 | 5 | ✅ 完成 | 定期过期删除 |
-| 6 | 🔲 待做 | RDB 快照 + AOF 日志持久化 |
+| 6 | ✅ 完成 | RDB 快照 + AOF 日志持久化 |
 | 7 | 🔲 待做 | 压测对比 + README |

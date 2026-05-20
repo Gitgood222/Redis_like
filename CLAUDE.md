@@ -54,7 +54,7 @@ Single-threaded event-loop server modeled on Redis. The `EventLoop` wraps `selec
 | 3 | Done | Hash + List commands |
 | 4 | Done    | Set + ZSet commands (SkipList) |
 | 5 | Done    | Periodic expiry |
-| 6 | Pending | RDB + AOF persistence |
+| 6 | Done    | RDB + AOF persistence |
 | 7 | Pending | Benchmark + README |
 
 ## Constraints

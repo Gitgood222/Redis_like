@@ -121,3 +121,24 @@ target_compile_options(test_expire PRIVATE
 )
 
 add_test(NAME expire COMMAND test_expire)
+
+add_executable(test_persistence
+    test_persistence.cpp
+    ${TEST_SRC_DIR}/storage/rdb.cpp
+    ${TEST_SRC_DIR}/storage/aof.cpp
+    ${TEST_SRC_DIR}/ds/skiplist.cpp
+    ${TEST_SRC_DIR}/command/string_cmd.cpp
+    ${TEST_SRC_DIR}/command/hash_cmd.cpp
+    ${TEST_SRC_DIR}/command/router.cpp
+    ${TEST_SRC_DIR}/expire.cpp
+    ${TEST_SRC_DIR}/resp_codec.cpp
+)
+
+target_include_directories(test_persistence PUBLIC ${TEST_SRC_DIR})
+
+target_compile_options(test_persistence PRIVATE
+    $<$<CXX_COMPILER_ID:MSVC>:/W4>
+    $<$<NOT:$<CXX_COMPILER_ID:MSVC>>:-Wall -Wextra>
+)
+
+add_test(NAME persistence COMMAND test_persistence)

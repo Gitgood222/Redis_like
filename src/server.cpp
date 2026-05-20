@@ -41,6 +41,7 @@ RedisServer::RedisServer() {
     RegisterListCommands(router_);
     RegisterSetCommands(router_);
     RegisterZSetCommands(router_);
+    aof_.Open();
 }
 
 RedisServer::~RedisServer() {
@@ -58,6 +59,8 @@ bool RedisServer::Init(int port) {
     loop_.AddEvent(listen_fd_, kEventReadable,
         [this](int mask) { OnAccept(mask); });
 
+    LoadPersistedData();
+
     running_ = true;
     std::cout << "[INFO] Server ready. Accepting connections..." << std::endl;
     return true;
@@ -65,6 +68,13 @@ bool RedisServer::Init(int port) {
 
 void RedisServer::Stop() {
     running_ = false;
+
+    // Save final snapshot
+    if (db_.Size() > 0) {
+        rdb_.Save(db_);
+    }
+    aof_.Close();
+
     if (listen_fd_ != kInvalidSocket) {
         loop_.RemoveEvent(listen_fd_);
         CLOSE_SOCKET(listen_fd_);
@@ -148,8 +158,10 @@ void RedisServer::OnClientEvent(socket_t fd, int mask) {
 // ---------- command processing ----------
 
 void RedisServer::ProcessCommand(Client& client, RespCommand&& cmd) {
+    std::string name = CommandRouter::Normalize(cmd.name);
+    bool is_write = AofLogger::IsWriteCommand(name);
+
     CmdContext ctx{db_, expire_, std::move(cmd), Clock::now()};
-    std::string name = CommandRouter::Normalize(ctx.cmd.name);
 
     std::string response;
     if (name == "QUIT") {
@@ -159,6 +171,10 @@ void RedisServer::ProcessCommand(Client& client, RespCommand&& cmd) {
         response = router_.Execute(ctx);
     } else {
         response = RespCodec::Error("ERR unknown command '" + ctx.cmd.name + "'");
+    }
+
+    if (is_write && response.find("-ERR") != 0) {
+        AppendToAof(ctx.cmd);
     }
 
     SendResponse(client, response);
@@ -185,6 +201,34 @@ void RedisServer::CloseClient(socket_t fd) {
     CLOSE_SOCKET(fd);
     clients_.erase(fd);
     std::cout << "[INFO] Client disconnected (fd=" << fd << ")" << std::endl;
+}
+
+// ---------- persistence ----------
+
+void RedisServer::LoadPersistedData() {
+    // Load RDB first, then replay AOF on top
+    rdb_.Load(db_);
+
+    aof_.Replay([this](RespCommand& cmd) {
+        std::string name = CommandRouter::Normalize(cmd.name);
+        if (name == "QUIT" || name == "PING" || name == "COMMAND") return;
+        CmdContext ctx{db_, expire_, std::move(cmd), Clock::now()};
+        if (router_.Exists(name)) {
+            router_.Execute(ctx);
+        }
+    });
+
+    std::cout << "[INFO] Data loaded: " << db_.Size() << " keys" << std::endl;
+}
+
+void RedisServer::AppendToAof(const RespCommand& cmd) {
+    // Re-serialize command to RESP and append
+    std::vector<std::string> parts;
+    parts.push_back(RespCodec::BulkString(cmd.name));
+    for (const auto& arg : cmd.args) {
+        parts.push_back(RespCodec::BulkString(arg));
+    }
+    aof_.Append(RespCodec::Array(parts));
 }
 
 }  // namespace redis
