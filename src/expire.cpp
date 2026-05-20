@@ -1,4 +1,6 @@
 #include "expire.h"
+#include <random>
+#include <algorithm>
 
 namespace redis {
 
@@ -13,11 +15,54 @@ bool ExpireManager::LazyCheck(Dict& db, const std::string& key, TimePoint now) {
 }
 
 int ExpireManager::PeriodicCheck(Dict& db, TimePoint now, int sampleSize) {
-    // TODO: implement random sampling in stage 5
-    (void)sampleSize;
-    (void)now;
-    (void)db;
-    return 0;
+    // Collect keys from the dict (copy — single-threaded, no concurrency issue)
+    auto keys = db.Keys();
+    if (keys.empty()) return 0;
+
+    static thread_local std::mt19937 rng(std::random_device{}());
+
+    int total_deleted = 0;
+    int loop_count = 0;
+    const int kMaxLoops = 16;  // safety limit
+
+    do {
+        int checked = 0;
+        int deleted = 0;
+        size_t remaining = keys.size();
+
+        while (checked < sampleSize && remaining > 0) {
+            std::uniform_int_distribution<size_t> dist(0, remaining - 1);
+            size_t idx = dist(rng);
+            const std::string& key = keys[idx];
+
+            ++checked;
+
+            auto obj = db.Get(key);
+            bool expired = obj && obj->IsExpired(now);
+
+            if (expired) {
+                db.Del(key);
+                ++deleted;
+            }
+
+            // Remove from sampling pool (swap with last)
+            std::swap(keys[idx], keys[remaining - 1]);
+            --remaining;
+        }
+
+        total_deleted += deleted;
+
+        // Redis: if >25% sampled keys were expired, keep scanning
+        if (deleted == 0 || (sampleSize > 0 && deleted * 4 <= checked)) {
+            break;
+        }
+
+        // Remove the deleted/checked portion from the keys vector
+        keys.resize(remaining);
+        ++loop_count;
+    } while (!keys.empty() && loop_count < kMaxLoops);
+
+    return total_deleted;
 }
 
 void ExpireManager::SetExpire(std::shared_ptr<RedisObject> obj, TimePoint expireAt) {

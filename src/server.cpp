@@ -80,6 +80,16 @@ void RedisServer::Stop() {
 void RedisServer::Tick(int timeoutMs) {
     if (!running_) return;
     loop_.RunOnce(timeoutMs);
+    PeriodicExpireCheck();
+}
+
+// ---------- periodic expiry ----------
+
+void RedisServer::PeriodicExpireCheck() {
+    auto now = Clock::now();
+    if (now - last_expire_check_ < std::chrono::milliseconds(100)) return;
+    last_expire_check_ = now;
+    expire_.PeriodicCheck(db_, now);
 }
 
 // ---------- event callbacks ----------

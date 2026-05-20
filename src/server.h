@@ -57,11 +57,14 @@ private:
     // flush pending writes for a client
     void FlushWriteBuf(Client& client);
 
+    void PeriodicExpireCheck();
+
     EventLoop     loop_;
     socket_t      listen_fd_ = kInvalidSocket;
     Dict          db_;
     ExpireManager expire_;
     CommandRouter router_;
+    TimePoint     last_expire_check_ = Clock::now();
 
     std::unordered_map<socket_t, Client> clients_;
     bool running_ = false;

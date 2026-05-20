@@ -107,3 +107,17 @@ target_compile_options(test_zset_cmd PRIVATE
 )
 
 add_test(NAME zset_cmd COMMAND test_zset_cmd)
+
+add_executable(test_expire
+    test_expire.cpp
+    ${TEST_SRC_DIR}/expire.cpp
+)
+
+target_include_directories(test_expire PUBLIC ${TEST_SRC_DIR})
+
+target_compile_options(test_expire PRIVATE
+    $<$<CXX_COMPILER_ID:MSVC>:/W4>
+    $<$<NOT:$<CXX_COMPILER_ID:MSVC>>:-Wall -Wextra>
+)
+
+add_test(NAME expire COMMAND test_expire)
