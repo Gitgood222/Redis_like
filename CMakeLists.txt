@@ -32,6 +32,7 @@ set(SOURCES
     ${SRC_DIR}/ds/intset.cpp
     ${SRC_DIR}/storage/rdb.cpp
     ${SRC_DIR}/storage/aof.cpp
+    ${SRC_DIR}/pubsub.cpp
 )
 
 set(HEADERS

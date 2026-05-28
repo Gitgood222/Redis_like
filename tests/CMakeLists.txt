@@ -156,3 +156,17 @@ target_compile_options(test_intset PRIVATE
 )
 
 add_test(NAME intset COMMAND test_intset)
+
+add_executable(test_pubsub
+    test_pubsub.cpp
+    ${TEST_SRC_DIR}/pubsub.cpp
+)
+
+target_include_directories(test_pubsub PUBLIC ${TEST_SRC_DIR})
+
+target_compile_options(test_pubsub PRIVATE
+    $<$<CXX_COMPILER_ID:MSVC>:/W4>
+    $<$<NOT:$<CXX_COMPILER_ID:MSVC>>:-Wall -Wextra>
+)
+
+add_test(NAME pubsub COMMAND test_pubsub)

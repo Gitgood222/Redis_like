@@ -1,6 +1,7 @@
 #pragma once
 
 #include "../common.h"
+#include "../event_loop.h"
 #include "../object.h"
 #include "../dict.h"
 #include "../expire.h"
@@ -11,6 +12,8 @@
 
 namespace redis {
 
+class PubSubManager;
+
 // ---------- 命令上下文 ----------
 struct CmdContext {
     Dict&          db;
@@ -18,6 +21,8 @@ struct CmdContext {
     RespCommand    cmd;
     TimePoint      now;         // current time for expiry checks
     Stats*         stats = nullptr;
+    PubSubManager* pubsub = nullptr;
+    socket_t       client_fd = kInvalidSocket;
 
     void RecordHit()     { if (stats) stats->RecordHit(); }
     void RecordMiss()    { if (stats) stats->RecordMiss(); }

@@ -4,7 +4,7 @@
 
 ![C++](https://img.shields.io/badge/C%2B%2B-20-blue)
 ![CMake](https://img.shields.io/badge/CMake-3.20%2B-green)
-![Tests](https://img.shields.io/badge/tests-126%20passed-brightgreen)
+![Tests](https://img.shields.io/badge/tests-10%20suites-brightgreen)
 ![License](https://img.shields.io/badge/license-MIT-lightgrey)
 
 ## 快速开始
@@ -13,17 +13,17 @@
 # 构建
 cd build && cmake .. -G "MinGW Makefiles" && cmake --build .
 
-# 启动服务（默认 6379 端口）
+# 启动服务（默认 6380 端口）
 ./redis_like.exe
 
 # 另开终端，用 redis-cli 操作
-redis-cli -p 6379 SET mykey hello EX 60
-redis-cli -p 6379 GET mykey        # → "hello"
-redis-cli -p 6379 HSET user name Alice age 30
-redis-cli -p 6379 HGETALL user     # → name, Alice, age, 30
-redis-cli -p 6379 LPUSH queue a b c
-redis-cli -p 6379 ZADD scores 100 alice 200 bob
-redis-cli -p 6379 ZRANGE scores 0 -1 WITHSCORES
+redis-cli -p 6380 SET mykey hello EX 60
+redis-cli -p 6380 GET mykey        # → "hello"
+redis-cli -p 6380 HSET user name Alice age 30
+redis-cli -p 6380 HGETALL user     # → name, Alice, age, 30
+redis-cli -p 6380 LPUSH queue a b c
+redis-cli -p 6380 ZADD scores 100 alice 200 bob
+redis-cli -p 6380 ZRANGE scores 0 -1 WITHSCORES
 ```
 
 ## 特性
@@ -32,18 +32,20 @@ redis-cli -p 6379 ZRANGE scores 0 -1 WITHSCORES
 
 - **RESP 协议兼容** — 使用标准 `redis-cli` 直接连接
 - **5 种数据结构** — String、Hash、List、Set、Sorted Set
-- **43 条命令** — 覆盖全部数据类型的常用操作
+- **50+ 条命令** — 覆盖全部数据类型的常用操作，含 Pub/Sub
 - **过期策略** — 惰性删除 + 定期随机采样（与 Redis 一致）
 - **持久化** — RDB 二进制快照 + AOF 命令日志
-- **事件驱动** — select/epoll 多路复用，单线程事件循环
+- **事件驱动** — epoll/select 多路复用，单线程事件循环，serverCron 定时任务
 
 ### 工程亮点
 
 - 现代 C++20：`std::variant`、`shared_ptr`、RAII、move 语义
-- 跳表实现 ZSet，支持 ZRANK/ZREVRANK 和 WITHSCORES
+- 跳表实现 ZSet，支持 ZRANK/ZREVRANK 和 WITHSCORES；IntSet 紧凑整数集合编码
+- 发布/订阅 (Pub/Sub) 支持频道订阅和模式匹配 (glob)
+- INFO 命令输出 server/clients/stats/persistence/keyspace 等运行状态
 - 零外部依赖，仅使用标准库 + OS 套接字 API
 - CMake 跨平台构建，Windows/Linux 兼容
-- 126 项测试覆盖，自制最小测试框架
+- 10 个测试套件覆盖全部模块，自制最小测试框架
 
 ## 支持的命令
 
@@ -55,17 +57,18 @@ redis-cli -p 6379 ZRANGE scores 0 -1 WITHSCORES
 | **Set** | SADD SREM SISMEMBER SMEMBERS SCARD SPOP |
 | **ZSet** | ZADD ZREM ZSCORE ZRANK ZREVRANK ZRANGE ZREVRANGE ZCARD |
 | **Key** | DEL EXISTS EXPIRE TTL PEXPIRE PTTL TYPE KEYS |
-| **Server** | PING COMMAND QUIT |
+| **Pub/Sub** | SUBSCRIBE UNSUBSCRIBE PUBLISH PSUBSCRIBE PUNSUBSCRIBE |
+| **Server** | PING COMMAND QUIT INFO |
 
 ## 架构
 
 ```
 main.cpp
   └─ RedisServer
-       ├─ EventLoop (select/epoll)    ← 事件驱动网络层
+       ├─ EventLoop (epoll/select)    ← 事件驱动网络层 + serverCron
        ├─ RespCodec                   ← RESP 解析/序列化
        ├─ CommandRouter               ← O(1) 命令路由表
-       │    ├─ RegisterServerCommands → PING/COMMAND/QUIT
+       │    ├─ RegisterServerCommands → PING/COMMAND/QUIT/INFO
        │    ├─ RegisterStringCommands → SET/GET
        │    ├─ RegisterKeyCommands    → DEL/EXISTS/EXPIRE/TTL/TYPE/KEYS
        │    ├─ RegisterHashCommands   → HSET/HGET/HDEL/...
@@ -74,7 +77,10 @@ main.cpp
        │    └─ RegisterZSetCommands   → ZADD/ZRANK/ZRANGE/...
        ├─ Dict (unordered_map)        ← 全局键空间
        ├─ ExpireManager               ← 惰性 + 定期删除
-       ├─ SkipList                    ← ZSet 核心数据结构
+       ├─ PubSubManager               ← 频道 + 模式订阅管理
+       ├─ Stats                       ← 命中率 / 连接数 / 过期键统计
+       ├─ SkipList (ZSet)             ← 跳表核心数据结构
+       ├─ IntSet                      ← 紧凑整数集合编码
        ├─ RdbSaver                    ← 二进制快照
        └─ AofLogger                   ← 命令日志追加 + 回放
 ```
@@ -96,7 +102,7 @@ main.cpp
 # 构建
 cd build && cmake .. && cmake --build .
 
-# 运行全部测试（126 项）
+# 运行全部测试
 ctest
 
 # 运行指定测试
@@ -108,6 +114,8 @@ ctest
 ./tests/test_zset_cmd.exe
 ./tests/test_expire.exe
 ./tests/test_persistence.exe
+./tests/test_intset.exe
+./tests/test_pubsub.exe
 
 # 压测（需先启动服务）
 ./redis_like.exe &
@@ -168,37 +176,41 @@ redis_like/
 ├── DEVELOPMENT.md         # 开发文档
 ├── description.md         # 项目设计文档
 ├── src/
-│   ├── main.cpp		   # 主函数入口
-│   ├── server.h/cpp	   # 服务器核心逻辑
-│   ├── common.h           # 公共类型
-│   ├── object.h           # RedisObject variant
-│   ├── dict.h             # 全局键空间
-│   ├── event_loop.h/cpp   # select/epoll 事件循环
-│   ├── resp_codec.h/cpp   # RESP 协议编解码
-│   ├── expire.h/cpp       # 过期管理器
+│   ├── main.cpp            # 主函数入口
+│   ├── server.h/cpp        # 服务器核心逻辑
+│   ├── common.h            # 公共类型
+│   ├── object.h            # RedisObject variant
+│   ├── dict.h              # 全局键空间
+│   ├── event_loop.h/cpp    # epoll/select 事件循环 + 时间事件
+│   ├── resp_codec.h/cpp    # RESP 协议编解码
+│   ├── expire.h/cpp        # 过期管理器
+│   ├── pubsub.h/cpp        # 发布/订阅管理器
+│   ├── stats.h             # 运行统计 (INFO 命令)
 │   ├── command/
-│   │   ├── router.h/cpp   # 命令路由
-│   │   ├── string_cmd.cpp # 字符串命令
-│   │   ├── hash_cmd.cpp   # 哈希命令
-│   │   ├── list_cmd.cpp   # 列表命令
-│   │   ├── set_cmd.cpp    # 集合命令
-│   │   └── zset_cmd.cpp   # 有序集合命令
-│   ├── ds/					# 数据结构
-│   │   ├── skiplist.h/cpp  # 跳表（ZSet）
-│   │   ├── list.h/cpp      # 链表
-│   │   └── intset.h        # 整数集合
-│   └── storage/			# 持久化
-│       ├── rdb.h/cpp       # RDB 快照
-│       └── aof.h/cpp       # AOF 日志
-├── tests/                  # 8 个测试套件，126 项
-│   └── test_expire.cpp
-│   └── test_hash_cmd.cpp
-│   └── test_list_cmd.cpp
-│   └── test_persistence.cpp
-│   └── test_resp.cpp
-│   └── test_set_cmd.cpp
-│   └── test_string_cmd.cpp
-│   └── test_zset_cmd.cpp
+│   │   ├── router.h/cpp    # 命令路由
+│   │   ├── string_cmd.cpp  # 字符串命令
+│   │   ├── hash_cmd.cpp    # 哈希命令
+│   │   ├── list_cmd.cpp    # 列表命令
+│   │   ├── set_cmd.cpp     # 集合命令
+│   │   └── zset_cmd.cpp    # 有序集合命令
+│   ├── ds/                 # 数据结构
+│   │   ├── skiplist.h/cpp   # 跳表 (ZSet)
+│   │   ├── list.h/cpp       # 链表
+│   │   └── intset.h/cpp     # 紧凑整数集合
+│   └── storage/            # 持久化
+│       ├── rdb.h/cpp        # RDB 快照
+│       └── aof.h/cpp        # AOF 日志
+├── tests/                  # 10 个测试套件
+│   ├── test_resp.cpp
+│   ├── test_string_cmd.cpp
+│   ├── test_hash_cmd.cpp
+│   ├── test_list_cmd.cpp
+│   ├── test_set_cmd.cpp
+│   ├── test_zset_cmd.cpp
+│   ├── test_expire.cpp
+│   ├── test_persistence.cpp
+│   ├── test_intset.cpp
+│   └── test_pubsub.cpp
 ├── benchmark/
 │   └── bench.cpp           # 压测工具
 └── build/

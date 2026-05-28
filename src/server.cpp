@@ -51,6 +51,145 @@ RedisServer::RedisServer() {
         if (!ctx.cmd.args.empty()) section = ctx.cmd.args[0];
         return RespCodec::BulkString(BuildInfoResponse(section));
     });
+
+    // ---------- Pub/Sub ----------
+
+    router_.Register("SUBSCRIBE", [this](CmdContext& ctx) -> std::string {
+        if (ctx.cmd.args.empty()) {
+            return RespCodec::Error("ERR wrong number of arguments for 'subscribe' command");
+        }
+        std::string response;
+        for (const auto& ch : ctx.cmd.args) {
+            pubsub_.Subscribe(ctx.client_fd, ch);
+            size_t count = pubsub_.GetClientChannels(ctx.client_fd).size();
+            response += RespCodec::Array({
+                RespCodec::BulkString("subscribe"),
+                RespCodec::BulkString(ch),
+                RespCodec::Integer(static_cast<int64_t>(count))
+            });
+        }
+        return response;
+    });
+
+    router_.Register("UNSUBSCRIBE", [this](CmdContext& ctx) -> std::string {
+        std::string response;
+        if (ctx.cmd.args.empty()) {
+            // Unsubscribe from all channels
+            auto channels = pubsub_.GetClientChannels(ctx.client_fd);
+            if (channels.empty()) {
+                return RespCodec::Array({
+                    RespCodec::BulkString("unsubscribe"),
+                    RespCodec::NullBulkString(),
+                    RespCodec::Integer(0)
+                });
+            }
+            for (const auto& ch : channels) {
+                pubsub_.Unsubscribe(ctx.client_fd, ch);
+                size_t count = pubsub_.GetClientChannels(ctx.client_fd).size();
+                response += RespCodec::Array({
+                    RespCodec::BulkString("unsubscribe"),
+                    RespCodec::BulkString(ch),
+                    RespCodec::Integer(static_cast<int64_t>(count))
+                });
+            }
+        } else {
+            for (const auto& ch : ctx.cmd.args) {
+                pubsub_.Unsubscribe(ctx.client_fd, ch);
+                size_t count = pubsub_.GetClientChannels(ctx.client_fd).size();
+                response += RespCodec::Array({
+                    RespCodec::BulkString("unsubscribe"),
+                    RespCodec::BulkString(ch),
+                    RespCodec::Integer(static_cast<int64_t>(count))
+                });
+            }
+        }
+        return response;
+    });
+
+    router_.Register("PUBLISH", [this](CmdContext& ctx) -> std::string {
+        if (ctx.cmd.args.size() != 2) {
+            return RespCodec::Error("ERR wrong number of arguments for 'publish' command");
+        }
+        const auto& channel = ctx.cmd.args[0];
+        const auto& message = ctx.cmd.args[1];
+
+        auto push = [this](socket_t fd, const std::string& ch,
+                           const std::string& msg, const std::string& pattern) {
+            auto it = clients_.find(fd);
+            if (it == clients_.end()) return;
+            std::string resp;
+            if (pattern.empty()) {
+                resp = RespCodec::Array({
+                    RespCodec::BulkString("message"),
+                    RespCodec::BulkString(ch),
+                    RespCodec::BulkString(msg)
+                });
+            } else {
+                resp = RespCodec::Array({
+                    RespCodec::BulkString("pmessage"),
+                    RespCodec::BulkString(pattern),
+                    RespCodec::BulkString(ch),
+                    RespCodec::BulkString(msg)
+                });
+            }
+            it->second.write_buf += resp;
+            FlushWriteBuf(it->second);
+        };
+
+        int count = pubsub_.Publish(channel, message, push);
+        return RespCodec::Integer(count);
+    });
+
+    router_.Register("PSUBSCRIBE", [this](CmdContext& ctx) -> std::string {
+        if (ctx.cmd.args.empty()) {
+            return RespCodec::Error("ERR wrong number of arguments for 'psubscribe' command");
+        }
+        std::string response;
+        for (const auto& pat : ctx.cmd.args) {
+            pubsub_.PSubscribe(ctx.client_fd, pat);
+            size_t count = pubsub_.GetClientPatterns(ctx.client_fd).size();
+            response += RespCodec::Array({
+                RespCodec::BulkString("psubscribe"),
+                RespCodec::BulkString(pat),
+                RespCodec::Integer(static_cast<int64_t>(count))
+            });
+        }
+        return response;
+    });
+
+    router_.Register("PUNSUBSCRIBE", [this](CmdContext& ctx) -> std::string {
+        std::string response;
+        if (ctx.cmd.args.empty()) {
+            auto patterns = pubsub_.GetClientPatterns(ctx.client_fd);
+            if (patterns.empty()) {
+                return RespCodec::Array({
+                    RespCodec::BulkString("punsubscribe"),
+                    RespCodec::NullBulkString(),
+                    RespCodec::Integer(0)
+                });
+            }
+            for (const auto& pat : patterns) {
+                pubsub_.PUnsubscribe(ctx.client_fd, pat);
+                size_t count = pubsub_.GetClientPatterns(ctx.client_fd).size();
+                response += RespCodec::Array({
+                    RespCodec::BulkString("punsubscribe"),
+                    RespCodec::BulkString(pat),
+                    RespCodec::Integer(static_cast<int64_t>(count))
+                });
+            }
+        } else {
+            for (const auto& pat : ctx.cmd.args) {
+                pubsub_.PUnsubscribe(ctx.client_fd, pat);
+                size_t count = pubsub_.GetClientPatterns(ctx.client_fd).size();
+                response += RespCodec::Array({
+                    RespCodec::BulkString("punsubscribe"),
+                    RespCodec::BulkString(pat),
+                    RespCodec::Integer(static_cast<int64_t>(count))
+                });
+            }
+        }
+        return response;
+    });
 }
 
 RedisServer::~RedisServer() {
@@ -187,8 +326,19 @@ void RedisServer::ProcessCommand(Client& client, RespCommand&& cmd) {
     std::string name = CommandRouter::Normalize(cmd.name);
     bool is_write = AofLogger::IsWriteCommand(name);
 
-    CmdContext ctx{db_, expire_, std::move(cmd), Clock::now(), &stats_};
+    CmdContext ctx{db_, expire_, std::move(cmd), Clock::now(), &stats_, &pubsub_, client.fd};
     stats_.total_commands_processed++;
+
+    // Enforce pub/sub mode: subscribed clients can only run pub/sub commands
+    if (pubsub_.IsSubscribed(client.fd)) {
+        if (name != "SUBSCRIBE" && name != "UNSUBSCRIBE" &&
+            name != "PSUBSCRIBE" && name != "PUNSUBSCRIBE" &&
+            name != "PING" && name != "QUIT") {
+            SendResponse(client, RespCodec::Error(
+                "ERR only (P)SUBSCRIBE / (P)UNSUBSCRIBE / PING / QUIT allowed in this context"));
+            return;
+        }
+    }
 
     std::string response;
     if (name == "QUIT") {
@@ -242,6 +392,7 @@ void RedisServer::FlushWriteBuf(Client& client) {
 }
 
 void RedisServer::CloseClient(socket_t fd) {
+    pubsub_.UnsubscribeAll(fd);
     loop_.RemoveEvent(fd);
     CLOSE_SOCKET(fd);
     clients_.erase(fd);

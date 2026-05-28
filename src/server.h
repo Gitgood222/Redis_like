@@ -7,6 +7,7 @@
 #include "expire.h"
 #include "command/router.h"
 #include "stats.h"
+#include "pubsub.h"
 #include "storage/rdb.h"
 #include "storage/aof.h"
 #include <vector>
@@ -61,6 +62,7 @@ private:
     ExpireManager expire_;
     CommandRouter router_;
     Stats         stats_;
+    PubSubManager pubsub_;
 
     RdbSaver rdb_{"dump.rdb"};
     AofLogger aof_{"appendonly.aof"};

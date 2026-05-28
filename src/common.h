@@ -15,7 +15,7 @@
 
 namespace redis {
 
-constexpr int kDefaultPort = 6379;  // 默认端口6379
+constexpr int kDefaultPort = 6380;  // 默认端口6380
 constexpr int kMaxClients = 1024;   // selece模式，能连接的最大客户端数量
 constexpr int kReadBufferSize = 4096;
 constexpr size_t kMaxBulkSize = 512 * 1024 * 1024;  // RESP多行字符串响应的最大大小512MB
