@@ -192,7 +192,25 @@ void RedisServer::FlushWriteBuf(Client& client) {
     if (sent > 0) {
         client.write_buf.erase(0, sent);
     } else if (sent < 0) {
-        // errno would tell us more; for now, ignore
+        // EAGAIN/EWOULDBLOCK — enable EPOLLOUT so we get notified when writable
+        if (!client.writable_mask) {
+            loop_.ModifyMask(client.fd, kEventReadable | kEventWritable);
+            client.writable_mask = true;
+        }
+        return;
+    }
+
+    // Toggle EPOLLOUT based on whether pending data remains
+    if (!client.write_buf.empty()) {
+        if (!client.writable_mask) {
+            loop_.ModifyMask(client.fd, kEventReadable | kEventWritable);
+            client.writable_mask = true;
+        }
+    } else {
+        if (client.writable_mask) {
+            loop_.ModifyMask(client.fd, kEventReadable);
+            client.writable_mask = false;
+        }
     }
 }
 

@@ -18,6 +18,7 @@ struct Client {
     RespCodec  codec;
     std::string write_buf;
     bool       close_after_write = false;
+    bool       writable_mask = false;  // whether EPOLLOUT is set in the event loop
 };
 
 class RedisServer {

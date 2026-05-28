@@ -9,13 +9,17 @@
     #pragma comment(lib, "ws2_32.lib")
 #else
     #include <arpa/inet.h>
-    #include <sys/select.h>
     #include <sys/socket.h>
     #include <sys/time.h>
     #include <netinet/in.h>
     #include <unistd.h>
     #include <fcntl.h>
     #include <cstring>
+    #ifdef __linux__
+        #include <sys/epoll.h>
+    #else
+        #include <sys/select.h>
+    #endif
 #endif
 
 namespace redis {
@@ -81,7 +85,14 @@ socket_t CreateListenSocket(int port, int backlog) {
 
 // ---------- EventLoop ----------
 
-EventLoop::EventLoop() {}
+EventLoop::EventLoop() {
+#ifdef __linux__
+    epfd_ = epoll_create1(0);
+    if (epfd_ == -1) {
+        std::cerr << "[ERROR] epoll_create1 failed: " << std::strerror(errno) << std::endl;
+    }
+#endif
+}
 
 EventLoop::~EventLoop() {
 #ifdef __linux__
@@ -90,29 +101,58 @@ EventLoop::~EventLoop() {
 }
 
 void EventLoop::AddEvent(socket_t fd, int mask, EventCallback cb) {
+    bool exists = events_.find(fd) != events_.end();
+
     auto& ev = events_[fd];
     ev.fd   = fd;
     ev.mask = mask;
     ev.cb   = std::move(cb);
+
+#ifdef __linux__
+    if (epfd_ == -1) return;
+
+    epoll_event ee{};
+    ee.data.fd = fd;
+    if (mask & kEventReadable) ee.events |= EPOLLIN;
+    if (mask & kEventWritable) ee.events |= EPOLLOUT;
+
+    int op = exists ? EPOLL_CTL_MOD : EPOLL_CTL_ADD;
+    if (epoll_ctl(epfd_, op, fd, &ee) == -1) {
+        std::cerr << "[ERROR] epoll_ctl add fd=" << fd << ": " << std::strerror(errno) << std::endl;
+    }
+#endif
 }
 
 void EventLoop::RemoveEvent(socket_t fd) {
+#ifdef __linux__
+    if (epfd_ != -1) {
+        epoll_ctl(epfd_, EPOLL_CTL_DEL, fd, nullptr);
+    }
+#endif
     events_.erase(fd);
 }
 
 void EventLoop::ModifyMask(socket_t fd, int mask) {
     auto it = events_.find(fd);
-    if (it != events_.end()) it->second.mask = mask;
+    if (it != events_.end()) {
+        it->second.mask = mask;
+#ifdef __linux__
+        if (epfd_ == -1) return;
+        epoll_event ee{};
+        ee.data.fd = fd;
+        if (mask & kEventReadable) ee.events |= EPOLLIN;
+        if (mask & kEventWritable) ee.events |= EPOLLOUT;
+        epoll_ctl(epfd_, EPOLL_CTL_MOD, fd, &ee);
+#endif
+    }
 }
 
+#ifndef __linux__
 void EventLoop::FdSet(socket_t fd, fd_set* set, socket_t& maxfd) {
-#ifdef _WIN32
     FD_SET(fd, set);
-#else
-    FD_SET(fd, set);
-#endif
     if (fd > maxfd) maxfd = fd;
 }
+#endif
 
 void EventLoop::Dispatch(socket_t fd, int mask) {
     auto it = events_.find(fd);
@@ -122,6 +162,22 @@ void EventLoop::Dispatch(socket_t fd, int mask) {
 }
 
 void EventLoop::RunOnce(int timeoutMs) {
+#ifdef __linux__
+    if (epfd_ == -1) return;
+
+    constexpr int kMaxEvents = 128;
+    epoll_event fired[kMaxEvents];
+    int n = epoll_wait(epfd_, fired, kMaxEvents, timeoutMs);
+    if (n <= 0) return;
+
+    for (int i = 0; i < n; i++) {
+        int mask = 0;
+        uint32_t ev = fired[i].events;
+        if (ev & (EPOLLIN | EPOLLHUP | EPOLLERR)) mask |= kEventReadable;
+        if (ev & EPOLLOUT)                    mask |= kEventWritable;
+        if (mask) Dispatch(fired[i].data.fd, mask);
+    }
+#else
     fd_set rfds, wfds;
     FD_ZERO(&rfds);
     FD_ZERO(&wfds);
@@ -148,6 +204,7 @@ void EventLoop::RunOnce(int timeoutMs) {
         if (FD_ISSET(fd, &wfds)) mask |= kEventWritable;
         if (mask) Dispatch(fd, mask);
     }
+#endif
 }
 
 void EventLoop::Run() {

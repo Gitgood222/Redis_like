@@ -4,7 +4,7 @@
 
 ![C++](https://img.shields.io/badge/C%2B%2B-20-blue)
 ![CMake](https://img.shields.io/badge/CMake-3.20%2B-green)
-![Tests](https://img.shields.io/badge/tests-118%20passed-brightgreen)
+![Tests](https://img.shields.io/badge/tests-126%20passed-brightgreen)
 ![License](https://img.shields.io/badge/license-MIT-lightgrey)
 
 ## 快速开始
@@ -32,7 +32,7 @@ redis-cli -p 6379 ZRANGE scores 0 -1 WITHSCORES
 
 - **RESP 协议兼容** — 使用标准 `redis-cli` 直接连接
 - **5 种数据结构** — String、Hash、List、Set、Sorted Set
-- **42 条命令** — 覆盖全部数据类型的常用操作
+- **43 条命令** — 覆盖全部数据类型的常用操作
 - **过期策略** — 惰性删除 + 定期随机采样（与 Redis 一致）
 - **持久化** — RDB 二进制快照 + AOF 命令日志
 - **事件驱动** — select/epoll 多路复用，单线程事件循环
@@ -43,7 +43,7 @@ redis-cli -p 6379 ZRANGE scores 0 -1 WITHSCORES
 - 跳表实现 ZSet，支持 ZRANK/ZREVRANK 和 WITHSCORES
 - 零外部依赖，仅使用标准库 + OS 套接字 API
 - CMake 跨平台构建，Windows/Linux 兼容
-- 118 项测试覆盖，自制最小测试框架
+- 126 项测试覆盖，自制最小测试框架
 
 ## 支持的命令
 
@@ -54,7 +54,7 @@ redis-cli -p 6379 ZRANGE scores 0 -1 WITHSCORES
 | **List** | LPUSH RPUSH LPOP RPOP LLEN LRANGE LINDEX |
 | **Set** | SADD SREM SISMEMBER SMEMBERS SCARD SPOP |
 | **ZSet** | ZADD ZREM ZSCORE ZRANK ZREVRANK ZRANGE ZREVRANGE ZCARD |
-| **Key** | DEL EXISTS EXPIRE TTL PEXPIRE PTTL TYPE |
+| **Key** | DEL EXISTS EXPIRE TTL PEXPIRE PTTL TYPE KEYS |
 | **Server** | PING COMMAND QUIT |
 
 ## 架构
@@ -67,7 +67,7 @@ main.cpp
        ├─ CommandRouter               ← O(1) 命令路由表
        │    ├─ RegisterServerCommands → PING/COMMAND/QUIT
        │    ├─ RegisterStringCommands → SET/GET
-       │    ├─ RegisterKeyCommands    → DEL/EXISTS/EXPIRE/TTL/TYPE
+       │    ├─ RegisterKeyCommands    → DEL/EXISTS/EXPIRE/TTL/TYPE/KEYS
        │    ├─ RegisterHashCommands   → HSET/HGET/HDEL/...
        │    ├─ RegisterListCommands   → LPUSH/RPOP/LRANGE/...
        │    ├─ RegisterSetCommands    → SADD/SREM/SPOP/...
@@ -82,12 +82,12 @@ main.cpp
 ### 请求处理链路
 
 ```
-1. select() 多路复用监听 fd
+1. epoll/select 多路复用监听 fd
 2. recv() 接收客户端数据
 3. RespCodec::Feed() 解析为 RespCommand{name, args}
 4. CommandRouter 查表分发到 CmdHandler
 5. CmdHandler 执行命令，返回 RESP 响应
-6. send() 非阻塞写回客户端
+6. send() 非阻塞写回，未发完则注册 EPOLLOUT 等待继续发送
 ```
 
 ## 构建 & 测试
@@ -96,7 +96,7 @@ main.cpp
 # 构建
 cd build && cmake .. && cmake --build .
 
-# 运行全部测试（118 项）
+# 运行全部测试（126 项）
 ctest
 
 # 运行指定测试
@@ -190,7 +190,7 @@ redis_like/
 │   └── storage/			# 持久化
 │       ├── rdb.h/cpp       # RDB 快照
 │       └── aof.h/cpp       # AOF 日志
-├── tests/                  # 8 个测试套件，118 项
+├── tests/                  # 8 个测试套件，126 项
 │   └── test_expire.cpp
 │   └── test_hash_cmd.cpp
 │   └── test_list_cmd.cpp

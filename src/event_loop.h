@@ -36,7 +36,7 @@ struct FileEvent {
 };
 
 // ---------- EventLoop ----------
-// select-based implementation for portability; epoll specialization on Linux.
+// Uses epoll on Linux, select on other platforms.
 class EventLoop {
 public:
     EventLoop();

@@ -19,6 +19,68 @@ static std::optional<int64_t> ParseInt(const std::string& s) {
     return v;
 }
 
+// Glob pattern matcher supporting *, ?, [abc], [^abc], and [a-z] ranges.
+static bool MatchGlob(const std::string& str, const std::string& pattern) {
+    size_t si = 0, pi = 0;
+    size_t starIdx = std::string::npos;
+    size_t matchIdx = 0;
+
+    while (si < str.size()) {
+        if (pi < pattern.size() && (pattern[pi] == '?' || pattern[pi] == str[si])) {
+            ++si;
+            ++pi;
+        } else if (pi < pattern.size() && pattern[pi] == '*') {
+            starIdx = pi;
+            matchIdx = si;
+            ++pi;
+        } else if (starIdx != std::string::npos) {
+            pi = starIdx + 1;
+            ++matchIdx;
+            si = matchIdx;
+        } else if (pi < pattern.size() && pattern[pi] == '[') {
+            size_t close = pattern.find(']', pi);
+            if (close == std::string::npos) {
+                if (pattern[pi] != str[si]) return false;
+                ++si;
+                ++pi;
+            } else {
+                bool negate = (pi + 1 < pattern.size() && pattern[pi + 1] == '^');
+                size_t cs = negate ? pi + 2 : pi + 1;
+                bool matched = false;
+                for (size_t ci = cs; ci < close; ++ci) {
+                    if (ci + 2 < close && pattern[ci + 1] == '-') {
+                        if (str[si] >= pattern[ci] && str[si] <= pattern[ci + 2]) {
+                            matched = true;
+                            break;
+                        }
+                        ci += 2;
+                    } else if (pattern[ci] == str[si]) {
+                        matched = true;
+                        break;
+                    }
+                }
+                if (negate) matched = !matched;
+                if (!matched) {
+                    if (starIdx != std::string::npos) {
+                        pi = starIdx + 1;
+                        ++matchIdx;
+                        si = matchIdx;
+                        continue;
+                    }
+                    return false;
+                }
+                ++si;
+                pi = close + 1;
+            }
+        } else {
+            return false;
+        }
+    }
+
+    while (pi < pattern.size() && pattern[pi] == '*') ++pi;
+    return pi == pattern.size();
+}
+
 // ---------- String Commands ----------
 
 // SET key value [EX seconds|PX milliseconds] [NX|XX]
@@ -235,6 +297,37 @@ static std::string TypeCmd(CmdContext& ctx) {
     return RespCodec::SimpleString(ObjTypeName(obj->type));
 }
 
+// KEYS pattern
+static std::string KeysCmd(CmdContext& ctx) {
+    if (ctx.cmd.args.empty()) {
+        return RespCodec::Error("ERR wrong number of arguments for 'KEYS' command");
+    }
+
+    const std::string& pattern = ctx.cmd.args[0];
+
+    // Collect keys first to avoid iterator invalidation during lazy deletion
+    auto keys = ctx.db.Keys();
+    std::vector<std::string> matches;
+    for (const auto& key : keys) {
+        auto obj = ctx.db.Get(key);
+        if (obj && obj->IsExpired(ctx.now)) {
+            ctx.db.Del(key);
+            continue;
+        }
+        if (!obj) continue;
+        if (MatchGlob(key, pattern)) {
+            matches.push_back(key);
+        }
+    }
+
+    std::vector<std::string> resp_items;
+    resp_items.reserve(matches.size());
+    for (const auto& k : matches) {
+        resp_items.push_back(RespCodec::BulkString(k));
+    }
+    return RespCodec::Array(resp_items);
+}
+
 // ---------- Registration ----------
 
 void RegisterStringCommands(CommandRouter& r) {
@@ -250,6 +343,7 @@ void RegisterKeyCommands(CommandRouter& r) {
     r.Register("PEXPIRE", PExpireCmd);
     r.Register("PTTL",   PTtlCmd);
     r.Register("TYPE",   TypeCmd);
+    r.Register("KEYS",   KeysCmd);
 }
 
 }  // namespace redis
