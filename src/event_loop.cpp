@@ -161,21 +161,82 @@ void EventLoop::Dispatch(socket_t fd, int mask) {
     }
 }
 
+// ---------- time events ----------
+
+int64_t EventLoop::AddTimeEvent(Duration after, Duration period,
+                                std::function<void()> callback) {
+    int64_t id = next_time_event_id_++;
+    TimeEvent te;
+    te.id       = id;
+    te.when     = Clock::now() + after;
+    te.period   = period;
+    te.callback = std::move(callback);
+    time_events_.push_back(std::move(te));
+    return id;
+}
+
+void EventLoop::RemoveTimeEvent(int64_t id) {
+    time_events_.erase(
+        std::remove_if(time_events_.begin(), time_events_.end(),
+                       [id](const TimeEvent& te) { return te.id == id; }),
+        time_events_.end());
+}
+
+void EventLoop::ProcessTimeEvents() {
+    auto now = Clock::now();
+    std::vector<TimeEvent> keep;
+    keep.reserve(time_events_.size());
+
+    for (auto& te : time_events_) {
+        if (te.when <= now) {
+            if (te.callback) te.callback();
+            if (te.period.count() > 0) {
+                // Recurring: advance to next fire time
+                te.when += te.period;
+                // Avoid drift: if we fell behind, clamp to now + period
+                if (te.when <= now) te.when = now + te.period;
+                keep.push_back(std::move(te));
+            }
+            // else one-shot: drop it
+        } else {
+            keep.push_back(std::move(te));
+        }
+    }
+    time_events_ = std::move(keep);
+}
+
+// ---------- RunOnce ----------
+
 void EventLoop::RunOnce(int timeoutMs) {
+    // Calculate effective timeout based on nearest time event
+    if (!time_events_.empty()) {
+        auto now = Clock::now();
+        for (const auto& te : time_events_) {
+            auto wait = std::chrono::duration_cast<std::chrono::milliseconds>(
+                te.when - now).count();
+            if (wait < 0) wait = 0;
+            if (wait < timeoutMs) timeoutMs = static_cast<int>(wait);
+        }
+    }
+
 #ifdef __linux__
-    if (epfd_ == -1) return;
+    if (epfd_ == -1) {
+        // Still process time events even if epoll is busted
+        ProcessTimeEvents();
+        return;
+    }
 
     constexpr int kMaxEvents = 128;
     epoll_event fired[kMaxEvents];
     int n = epoll_wait(epfd_, fired, kMaxEvents, timeoutMs);
-    if (n <= 0) return;
-
-    for (int i = 0; i < n; i++) {
-        int mask = 0;
-        uint32_t ev = fired[i].events;
-        if (ev & (EPOLLIN | EPOLLHUP | EPOLLERR)) mask |= kEventReadable;
-        if (ev & EPOLLOUT)                    mask |= kEventWritable;
-        if (mask) Dispatch(fired[i].data.fd, mask);
+    if (n > 0) {
+        for (int i = 0; i < n; i++) {
+            int mask = 0;
+            uint32_t ev = fired[i].events;
+            if (ev & (EPOLLIN | EPOLLHUP | EPOLLERR)) mask |= kEventReadable;
+            if (ev & EPOLLOUT)                    mask |= kEventWritable;
+            if (mask) Dispatch(fired[i].data.fd, mask);
+        }
     }
 #else
     fd_set rfds, wfds;
@@ -189,22 +250,24 @@ void EventLoop::RunOnce(int timeoutMs) {
         if (ev.mask & kEventWritable) FdSet(fd, &wfds, maxfd);
     }
 
-    if (maxfd == -1) return; // no events registered
+    if (maxfd != -1) {
+        timeval tv{};
+        tv.tv_sec  = timeoutMs / 1000;
+        tv.tv_usec = (timeoutMs % 1000) * 1000;
 
-    timeval tv{};
-    tv.tv_sec  = timeoutMs / 1000;
-    tv.tv_usec = (timeoutMs % 1000) * 1000;
-
-    int n = select(static_cast<int>(maxfd) + 1, &rfds, &wfds, nullptr, &tv);
-    if (n <= 0) return;
-
-    for (const auto& [fd, ev] : events_) {
-        int mask = 0;
-        if (FD_ISSET(fd, &rfds)) mask |= kEventReadable;
-        if (FD_ISSET(fd, &wfds)) mask |= kEventWritable;
-        if (mask) Dispatch(fd, mask);
+        int n = select(static_cast<int>(maxfd) + 1, &rfds, &wfds, nullptr, &tv);
+        if (n > 0) {
+            for (const auto& [fd, ev] : events_) {
+                int mask = 0;
+                if (FD_ISSET(fd, &rfds)) mask |= kEventReadable;
+                if (FD_ISSET(fd, &wfds)) mask |= kEventWritable;
+                if (mask) Dispatch(fd, mask);
+            }
+        }
     }
 #endif
+
+    ProcessTimeEvents();
 }
 
 void EventLoop::Run() {

@@ -6,6 +6,7 @@
 #include "dict.h"
 #include "expire.h"
 #include "command/router.h"
+#include "stats.h"
 #include "storage/rdb.h"
 #include "storage/aof.h"
 #include <vector>
@@ -42,26 +43,31 @@ private:
     void OnClientEvent(socket_t fd, int mask);
     void ProcessCommand(Client& client, RespCommand&& cmd);
     void SendResponse(Client& client, const std::string& resp);
+    void SetupServerCron();
+    void ServerCron();
     void CloseClient(socket_t fd);
     void FlushWriteBuf(Client& client);
-    void PeriodicExpireCheck();
 
     // persistence
     void LoadPersistedData();
     void AppendToAof(const RespCommand& cmd);
+
+    // info
+    std::string BuildInfoResponse(const std::string& section = "");
 
     EventLoop     loop_;
     socket_t      listen_fd_ = kInvalidSocket;
     Dict          db_;
     ExpireManager expire_;
     CommandRouter router_;
-    TimePoint     last_expire_check_ = Clock::now();
+    Stats         stats_;
 
     RdbSaver rdb_{"dump.rdb"};
     AofLogger aof_{"appendonly.aof"};
 
     std::unordered_map<socket_t, Client> clients_;
-    bool running_ = false;
+    bool    running_  = false;
+    int64_t cron_id_ = 0;
 };
 
 }  // namespace redis

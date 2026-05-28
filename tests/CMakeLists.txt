@@ -142,3 +142,17 @@ target_compile_options(test_persistence PRIVATE
 )
 
 add_test(NAME persistence COMMAND test_persistence)
+
+add_executable(test_intset
+    test_intset.cpp
+    ${TEST_SRC_DIR}/ds/intset.cpp
+)
+
+target_include_directories(test_intset PUBLIC ${TEST_SRC_DIR})
+
+target_compile_options(test_intset PRIVATE
+    $<$<CXX_COMPILER_ID:MSVC>:/W4>
+    $<$<NOT:$<CXX_COMPILER_ID:MSVC>>:-Wall -Wextra>
+)
+
+add_test(NAME intset COMMAND test_intset)

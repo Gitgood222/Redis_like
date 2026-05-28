@@ -29,6 +29,7 @@ set(SOURCES
     ${SRC_DIR}/expire.cpp
     ${SRC_DIR}/ds/skiplist.cpp
     ${SRC_DIR}/ds/list.cpp
+    ${SRC_DIR}/ds/intset.cpp
     ${SRC_DIR}/storage/rdb.cpp
     ${SRC_DIR}/storage/aof.cpp
 )

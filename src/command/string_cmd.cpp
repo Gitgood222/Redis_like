@@ -8,7 +8,9 @@ namespace redis {
 
 // Check and perform lazy expiry. Returns true if key was expired/deleted.
 static bool CheckExpire(CmdContext& ctx, const std::string& key) {
-    return ctx.expire.LazyCheck(ctx.db, key, ctx.now);
+    bool expired = ctx.expire.LazyCheck(ctx.db, key, ctx.now);
+    if (expired) ctx.RecordExpired();
+    return expired;
 }
 
 // Parse a string argument as int64. Returns nullopt on failure.
@@ -164,9 +166,11 @@ static std::string GetCmd(CmdContext& ctx) {
 
     auto obj = ctx.db.Get(key);
     if (!obj || obj->type != ObjType::kString) {
+        ctx.RecordMiss();
         return RespCodec::NullBulkString();
     }
 
+    ctx.RecordHit();
     auto* s = obj->As<RedisString>();
     if (!s) return RespCodec::NullBulkString();
     return RespCodec::BulkString(*s);
@@ -196,7 +200,8 @@ static std::string ExistsCmd(CmdContext& ctx) {
     int64_t count = 0;
     for (const auto& key : ctx.cmd.args) {
         CheckExpire(ctx, key);
-        if (ctx.db.Exists(key)) ++count;
+        if (ctx.db.Exists(key)) { ++count; ctx.RecordHit(); }
+        else ctx.RecordMiss();
     }
     return RespCodec::Integer(count);
 }
@@ -215,13 +220,13 @@ static std::string ExpireCmd(CmdContext& ctx) {
 
     CheckExpire(ctx, key);
     auto obj = ctx.db.Get(key);
-    if (!obj) return RespCodec::Integer(0);
+    if (!obj) { ctx.RecordMiss(); return RespCodec::Integer(0); }
+    ctx.RecordHit();
 
     if (*secs > 0) {
         ctx.expire.SetExpire(obj, ctx.now + std::chrono::seconds(*secs));
     } else {
         ctx.expire.RemoveExpire(obj);
-        // Negative expire = delete the key (Redis behavior)
         ctx.db.Del(key);
     }
     return RespCodec::Integer(1);
@@ -236,6 +241,7 @@ static std::string TtlCmd(CmdContext& ctx) {
     const std::string& key = ctx.cmd.args[0];
     CheckExpire(ctx, key);
     auto obj = ctx.db.Get(key);
+    if (!obj) ctx.RecordMiss(); else ctx.RecordHit();
     int64_t ttl = ctx.expire.GetTTL(obj, ctx.now);
     return RespCodec::Integer(ttl);
 }
@@ -254,7 +260,8 @@ static std::string PExpireCmd(CmdContext& ctx) {
 
     CheckExpire(ctx, key);
     auto obj = ctx.db.Get(key);
-    if (!obj) return RespCodec::Integer(0);
+    if (!obj) { ctx.RecordMiss(); return RespCodec::Integer(0); }
+    ctx.RecordHit();
 
     if (*ms > 0) {
         ctx.expire.SetExpire(obj, ctx.now + std::chrono::milliseconds(*ms));
@@ -275,7 +282,8 @@ static std::string PTtlCmd(CmdContext& ctx) {
     CheckExpire(ctx, key);
     auto obj = ctx.db.Get(key);
 
-    if (!obj) return RespCodec::Integer(-2);
+    if (!obj) { ctx.RecordMiss(); return RespCodec::Integer(-2); }
+    ctx.RecordHit();
     if (!obj->expire_at) return RespCodec::Integer(-1);
 
     auto remaining = std::chrono::duration_cast<std::chrono::milliseconds>(
@@ -292,8 +300,8 @@ static std::string TypeCmd(CmdContext& ctx) {
     const std::string& key = ctx.cmd.args[0];
     CheckExpire(ctx, key);
     auto obj = ctx.db.Get(key);
-    if (!obj) return RespCodec::SimpleString("none");
-
+    if (!obj) { ctx.RecordMiss(); return RespCodec::SimpleString("none"); }
+    ctx.RecordHit();
     return RespCodec::SimpleString(ObjTypeName(obj->type));
 }
 

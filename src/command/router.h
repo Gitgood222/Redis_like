@@ -5,6 +5,7 @@
 #include "../dict.h"
 #include "../expire.h"
 #include "../resp_codec.h"
+#include "../stats.h"
 #include <unordered_map>
 #include <functional>
 
@@ -16,6 +17,11 @@ struct CmdContext {
     ExpireManager& expire;
     RespCommand    cmd;
     TimePoint      now;         // current time for expiry checks
+    Stats*         stats = nullptr;
+
+    void RecordHit()     { if (stats) stats->RecordHit(); }
+    void RecordMiss()    { if (stats) stats->RecordMiss(); }
+    void RecordExpired() { if (stats) stats->RecordExpired(); }
 };
 
 // 命令处理器：接收上下文，返回 RESP 格式的响应字符串

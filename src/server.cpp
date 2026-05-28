@@ -1,5 +1,6 @@
 #include "server.h"
 #include <iostream>
+#include <sstream>
 #include <cstring>
 
 #ifdef _WIN32
@@ -8,6 +9,7 @@
 #else
     #include <sys/socket.h>
     #include <netinet/in.h>
+    #include <netinet/tcp.h>
     #include <arpa/inet.h>
     #include <unistd.h>
 #endif
@@ -42,6 +44,13 @@ RedisServer::RedisServer() {
     RegisterSetCommands(router_);
     RegisterZSetCommands(router_);
     aof_.Open();
+
+    // INFO
+    router_.Register("INFO", [this](CmdContext& ctx) -> std::string {
+        std::string section;
+        if (!ctx.cmd.args.empty()) section = ctx.cmd.args[0];
+        return RespCodec::BulkString(BuildInfoResponse(section));
+    });
 }
 
 RedisServer::~RedisServer() {
@@ -60,6 +69,8 @@ bool RedisServer::Init(int port) {
         [this](int mask) { OnAccept(mask); });
 
     LoadPersistedData();
+
+    SetupServerCron();
 
     running_ = true;
     std::cout << "[INFO] Server ready. Accepting connections..." << std::endl;
@@ -90,15 +101,20 @@ void RedisServer::Stop() {
 void RedisServer::Tick(int timeoutMs) {
     if (!running_) return;
     loop_.RunOnce(timeoutMs);
-    PeriodicExpireCheck();
 }
 
-// ---------- periodic expiry ----------
+// ---------- server cron ----------
 
-void RedisServer::PeriodicExpireCheck() {
+void RedisServer::SetupServerCron() {
+    using namespace std::chrono;
+    cron_id_ = loop_.AddTimeEvent(
+        milliseconds(100),   // first fire after 100ms
+        milliseconds(100),   // then every 100ms (10 Hz, same as Redis)
+        [this]() { ServerCron(); });
+}
+
+void RedisServer::ServerCron() {
     auto now = Clock::now();
-    if (now - last_expire_check_ < std::chrono::milliseconds(100)) return;
-    last_expire_check_ = now;
     expire_.PeriodicCheck(db_, now);
 }
 
@@ -116,6 +132,15 @@ void RedisServer::OnAccept(int /*mask*/) {
 
         SetNonBlocking(client_fd);
 
+        // Disable Nagle's algorithm for low latency
+        int tcp_nodelay = 1;
+        setsockopt(client_fd, IPPROTO_TCP, TCP_NODELAY,
+#ifdef _WIN32
+                   reinterpret_cast<const char*>(&tcp_nodelay), sizeof(tcp_nodelay));
+#else
+                   &tcp_nodelay, sizeof(tcp_nodelay));
+#endif
+
         Client client;
         client.fd = client_fd;
         clients_[client_fd] = std::move(client);
@@ -123,6 +148,7 @@ void RedisServer::OnAccept(int /*mask*/) {
         loop_.AddEvent(client_fd, kEventReadable,
             [this, client_fd](int mask) { OnClientEvent(client_fd, mask); });
 
+        stats_.total_connections_received++;
         std::cout << "[INFO] New client (fd=" << client_fd << ")" << std::endl;
     }
 }
@@ -161,7 +187,8 @@ void RedisServer::ProcessCommand(Client& client, RespCommand&& cmd) {
     std::string name = CommandRouter::Normalize(cmd.name);
     bool is_write = AofLogger::IsWriteCommand(name);
 
-    CmdContext ctx{db_, expire_, std::move(cmd), Clock::now()};
+    CmdContext ctx{db_, expire_, std::move(cmd), Clock::now(), &stats_};
+    stats_.total_commands_processed++;
 
     std::string response;
     if (name == "QUIT") {
@@ -247,6 +274,65 @@ void RedisServer::AppendToAof(const RespCommand& cmd) {
         parts.push_back(RespCodec::BulkString(arg));
     }
     aof_.Append(RespCodec::Array(parts));
+}
+
+// ---------- info ----------
+
+std::string RedisServer::BuildInfoResponse(const std::string& section) {
+    auto now = Clock::now();
+    auto uptime = std::chrono::duration_cast<std::chrono::seconds>(
+        now - stats_.start_time).count();
+
+    // Count keys with expiry
+    int64_t keys_with_expire = 0;
+    for (const auto& key : db_.Keys()) {
+        auto obj = db_.Get(key);
+        if (obj && obj->expire_at) keys_with_expire++;
+    }
+
+    std::ostringstream ss;
+
+    auto emit = [&](const std::string& sec, const std::string& line) {
+        if (section.empty() || section == sec) {
+            ss << line << "\r\n";
+        }
+    };
+
+    // Server
+    emit("server", "# Server");
+    emit("server", "redis_version:1.0.0");
+    emit("server", "uptime_in_seconds:" + std::to_string(uptime));
+    emit("server", "");
+
+    // Clients
+    emit("clients", "# Clients");
+    emit("clients", "connected_clients:" + std::to_string(clients_.size()));
+    emit("clients", "");
+
+    // Stats
+    emit("stats", "# Stats");
+    emit("stats", "total_commands_processed:" +
+         std::to_string(stats_.total_commands_processed));
+    emit("stats", "total_connections_received:" +
+         std::to_string(stats_.total_connections_received));
+    emit("stats", "keyspace_hits:" + std::to_string(stats_.keyspace_hits));
+    emit("stats", "keyspace_misses:" + std::to_string(stats_.keyspace_misses));
+    emit("stats", "expired_keys:" + std::to_string(stats_.expired_keys));
+    emit("stats", "");
+
+    // Persistence
+    emit("persistence", "# Persistence");
+    emit("persistence", "rdb_enabled:1");
+    emit("persistence", "aof_enabled:1");
+    emit("persistence", "");
+
+    // Keyspace
+    emit("keyspace", "# Keyspace");
+    emit("keyspace", "db0:keys=" + std::to_string(db_.Size()) +
+         ",expires=" + std::to_string(keys_with_expire));
+    emit("keyspace", "");
+
+    return ss.str();
 }
 
 }  // namespace redis

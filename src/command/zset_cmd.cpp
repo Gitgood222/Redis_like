@@ -8,7 +8,9 @@ namespace redis {
 namespace {
 
 bool CheckExpire(CmdContext& ctx, const std::string& key) {
-    return ctx.expire.LazyCheck(ctx.db, key, ctx.now);
+    bool expired = ctx.expire.LazyCheck(ctx.db, key, ctx.now);
+    if (expired) ctx.RecordExpired();
+    return expired;
 }
 
 // Get or create a ZSet. Returns nullptr if wrong type.
@@ -30,7 +32,8 @@ std::shared_ptr<RedisObject> GetZSet(CmdContext& ctx,
                                       const std::string& key) {
     CheckExpire(ctx, key);
     auto obj = ctx.db.Get(key);
-    if (!obj || obj->type != ObjType::kZSet) return nullptr;
+    if (!obj || obj->type != ObjType::kZSet) { ctx.RecordMiss(); return nullptr; }
+    ctx.RecordHit();
     return obj;
 }
 

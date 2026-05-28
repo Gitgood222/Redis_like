@@ -8,7 +8,9 @@ namespace {
 
 // Check and perform lazy expiry on a key. Returns true if expired/deleted.
 bool CheckExpire(CmdContext& ctx, const std::string& key) {
-    return ctx.expire.LazyCheck(ctx.db, key, ctx.now);
+    bool expired = ctx.expire.LazyCheck(ctx.db, key, ctx.now);
+    if (expired) ctx.RecordExpired();
+    return expired;
 }
 
 // Get or create a Hash object for the given key.
@@ -31,7 +33,8 @@ std::shared_ptr<RedisObject> GetHash(CmdContext& ctx,
                                       const std::string& key) {
     CheckExpire(ctx, key);
     auto obj = ctx.db.Get(key);
-    if (!obj || obj->type != ObjType::kHash) return nullptr;
+    if (!obj || obj->type != ObjType::kHash) { ctx.RecordMiss(); return nullptr; }
+    ctx.RecordHit();
     return obj;
 }
 

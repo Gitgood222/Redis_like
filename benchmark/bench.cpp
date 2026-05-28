@@ -14,6 +14,7 @@
 #else
     #include <sys/socket.h>
     #include <netinet/in.h>
+    #include <netinet/tcp.h>
     #include <arpa/inet.h>
     #include <unistd.h>
     using socket_t = int;
@@ -65,6 +66,15 @@ public:
             fd_ = kInvalidSocket;
             return false;
         }
+
+        int tcp_nodelay = 1;
+        setsockopt(fd_, IPPROTO_TCP, TCP_NODELAY,
+#ifdef _WIN32
+                   reinterpret_cast<const char*>(&tcp_nodelay), sizeof(tcp_nodelay));
+#else
+                   &tcp_nodelay, sizeof(tcp_nodelay));
+#endif
+
         return true;
     }
 

@@ -1,6 +1,7 @@
 #pragma once
 
 #include "common.h"
+#include <cstdint>
 #include <cstring>
 #include <functional>
 
@@ -35,6 +36,13 @@ struct FileEvent {
     EventCallback cb;
 };
 
+struct TimeEvent {
+    int64_t            id;
+    TimePoint          when;    // absolute fire time
+    Duration           period;  // 0 = one-shot, >0 = recurring interval
+    std::function<void()> callback;
+};
+
 // ---------- EventLoop ----------
 // Uses epoll on Linux, select on other platforms.
 class EventLoop {
@@ -46,10 +54,16 @@ public:
     EventLoop(const EventLoop&) = delete;
     EventLoop& operator=(const EventLoop&) = delete;
 
-    // Register / modify / remove a fd from the loop.
+    // File events — register / modify / remove a fd from the loop.
     void AddEvent(socket_t fd, int mask, EventCallback cb);
     void RemoveEvent(socket_t fd);
     void ModifyMask(socket_t fd, int mask);
+
+    // Time events — returns an id for later removal.
+    // period = 0 for one-shot, >0 for recurring.
+    int64_t AddTimeEvent(Duration after, Duration period,
+                         std::function<void()> callback);
+    void RemoveTimeEvent(int64_t id);
 
     // Block until at least one event fires, then dispatch.
     void RunOnce(int timeoutMs = 100);
@@ -62,9 +76,13 @@ public:
 private:
     void FdSet(socket_t fd, fd_set* set, socket_t& maxfd);
     void Dispatch(socket_t fd, int mask);
+    void ProcessTimeEvents();
 
     std::unordered_map<socket_t, FileEvent> events_;
     bool running_ = false;
+
+    std::vector<TimeEvent> time_events_;
+    int64_t next_time_event_id_ = 1;
 
 #ifdef __linux__
     int epfd_ = -1;  // reserved for epoll
